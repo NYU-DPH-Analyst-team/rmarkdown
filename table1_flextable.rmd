@@ -1,0 +1,235 @@
+---
+title: "R markdown"
+author: "Yifan Xu"
+date: "4/22/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(table1)
+library(flextable)
+library(officer)
+library(data.table)
+library(dplyr)
+
+```
+
+## R Markdown
+
+
+This is a paragraph in an **R Markdown** document.  
+
+Below is a code ~~chuck~~ chunk:
+
+```{r corrplot}
+b = cor(iris$Sepal.Length, iris$Sepal.Width,method = "pearson", use = "complete.obs")
+plot(iris$Sepal.Length, iris$Sepal.Width) 
+
+```
+
+The Pearson's correlation coefficient is `r b`.   
+  
+\clearpage   
+  
+Next is an example of two tables produced by r package *table1*.   
+
+```{r table, echo = F}
+
+table1(~Sepal.Length + Sepal.Width | Species, data = iris,  overall = "Overall", caption="Iris characteristics by species")
+
+```
+  
+\clearpage  
+  
+```{r table2, echo = F}
+pvalue <- function(x, ...) {
+  # Construct vectors of data y, and groups (strata) g
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times=sapply(x, length)))
+  if (is.numeric(y)) {
+    # For numeric variables, perform a wilcox test
+    p <- kruskal.test(y ~ g)$p.value
+  } else {
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+  }
+  # Format the p-value, using an HTML entity for the less-than sign.
+  # The initial empty string places the output on the line below the variable label.
+  c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+my.render.cont <- function(x) {
+   with(stats.apply.rounding(stats.default(x, ), digits = 2),
+        c("",
+          "median (Q1-Q3)" =
+            sprintf(paste("%s (",Q1,"- %s)"), MEDIAN,Q3)))
+ }
+
+table1(~Sepal.Length + Sepal.Width  | Species, data = iris, overall = F, caption = "Iris characteristics by species with P-value", 
+       render.continuous = my.render.cont, extra.col=list(`P-value`=pvalue))
+
+
+```
+  
+  
+\clearpage  
+  
+When we need to generate tables in a more complex format, the package *flextable* could be useful.  
+
+```{r flextable, echo = F}
+
+table_4 <- function(data, dig) {
+
+  
+  dataSummary <- data[,!colnames(data) %in% c("hosp")]
+   
+
+    # Top row for later
+
+  toprow <- c(paste(as.vector(nrow(dataSummary)),"(100)"))
+
+  firstcol <- transform(rep("",1))
+  rnames <- "Total Enrolled:"
+  for (p in 1:dim(dataSummary)[2]) {
+    
+    # Row names for factor variables include the variable name and then the names of the levels  
+    if (is.factor(dataSummary[ , p])) {
+      
+
+      temp <- paste(names(table(dataSummary[ , p]))) 
+      
+      temp2 <- rbind(colnames(dataSummary)[p],transform(rep("", dim(table(dataSummary[,p]))-1)))
+      
+      # Row names for continuous variables include the variable name and then rows for the number of observations and the median, Q1, and Q3    
+    } else {
+      
+      temp <- c("Mean", "Median", "Standard Deviation", "Minimum", "Maximum")
+      temp2 <- rbind(colnames(dataSummary)[p],transform(rep("", 4)))
+    }
+    
+    rnames <- c(rnames, temp)
+    firstcol <- rbind(firstcol,temp2)
+  }
+  
+  rounding <- dig
+
+  
+  
+  ### Summary function for factor variables and continuously measured variables
+  get_summary <- function(x) {
+
+    # For variables that are factors in the data frame
+    if (is.factor(x)) {
+      res_tot <-paste(as.vector(table(x)), 
+                      " ", "(", 
+                      format(round(as.vector(table(x) / sum(!is.na(x)+is.na(x))*100), digits = rounding),nsmall = rounding), 
+                      ")",
+                      sep = "")
+      res <- matrix(unlist(res_tot), byrow = FALSE)
+      
+      # Continuous variables  
+    } else {
+    count_tot <- sum(!is.na(x))
+    median_tot <- format(round(median(x, na.rm=TRUE), digits = rounding),nsmall = rounding)
+    mean_tot <- format(round(mean(x, na.rm=TRUE), digits = rounding) ,nsmall = rounding)
+    sd_tot <- format(round(sd(x, na.rm=TRUE), digits = rounding),nsmall = rounding)
+    min_tot <- format(round(min(x, na.rm=TRUE), digits = rounding),nsmall = rounding) 
+    max_tot <- format(round(max(x, na.rm=TRUE), digits = rounding),nsmall = rounding)
+    # p25_tot <- round(quantile(x, probs = 0.25, na.rm = TRUE), digits = rounding)
+    # p75_tot <- round(quantile(x, probs = 0.75, na.rm = TRUE), digits = rounding)
+    
+    restemp <- rbind(mean_tot, median_tot, sd_tot, min_tot, max_tot)
+    res <- matrix(unlist(restemp), byrow = FALSE)
+    }
+    list(res)
+  }
+  
+  # Run the get_summary function
+  res <- lapply(dataSummary, get_summary)
+  
+  # Get the table summary by accessing the list object
+  tableSummary <- do.call("rbind", lapply(res, function(y) y[[1]]))
+  tableSummary <- rbind(toprow, tableSummary)
+  tableSummary <- cbind(rnames, tableSummary)
+  # 
+  
+  colnames(tableSummary) <- c( "Characteristics","N (%)")
+  rownames(tableSummary) <- firstcol[,1]
+  # 
+  tableSummary[is.na(tableSummary)] <- ""
+  
+
+  # start flextable settings
+  
+  
+  t <- data.frame(tableSummary)
+  t <- setDT(t, keep.rownames = TRUE)[]
+  colnames(t) <- c( as.character(t[1,2]), " ",as.character(t[1,3]))
+  
+  #clean unwanted row names
+  t[c(1,3,5,7:14,16:17,19:20,22:27,29:32), 1] <- ""
+  t <- t[-c(1,5,9),]
+  
+  tall <- flextable(t) %>%
+    add_header_row( values = c("Characteristics", "N (%)"), colwidths = c(2, 1))%>%
+    align( i = 1, part = "header", align = "center")
+  
+  ft <- tall %>% 
+    align(align = "center", part = "header") %>%
+    padding(padding.top = 8, padding.bottom = 8, part = "header",i = 1)
+
+ft <- ft %>% 
+  bg(bg = "#99ccff", part = "header", i = 1) %>% 
+  bg(bg = "#b3b3b3", part = "header", i = 2, j = 1:2) %>% 
+  bg(bg = "#b3b3b3", part = "body",j = 1) %>% 
+  merge_at(i = 2, j = 1:2, part = "header") %>%
+  merge_at(i = 1:2, j = 1, part = "body") %>% 
+  merge_at(i = 4:11, j = 1, part = "body") %>%
+  merge_at(i = 12:14, j = 1, part = "body") %>%
+  merge_at(i = 15:17, j = 1, part = "body") %>%
+  merge_at(i = 18:24, j = 1, part = "body") %>%
+  merge_at(i = 25:29, j = 1, part = "body") %>%
+  align(i = 1, part = "header", align = "center")  %>%
+  align(i = 2, j = 1, part = "header", align = "right") %>%
+  align(j = 1, part = "body", align = "center") %>%
+  align(j = 2, part = "body", align = "left") %>%
+  align(j = 3, part = "body", align = "center") %>%
+  bold(i = 1, part = "header")%>% 
+  bold(i = 2, j = 1, part = "header")%>% 
+  bold(j = 1, part = "body") %>% autofit()
+
+
+small_border = fp_border(color="black", width = 1)
+ft <- border_remove(x = ft)   
+ft <- border_outer(ft, part="all", border = small_border )
+ft <- border_inner_h(ft, part="all", border = small_border )
+ft <- border_inner_v(ft, part="all", border = small_border )
+
+ft <- compose(ft, i = 12, j = 1,part="body", as_paragraph(as_chunk('Living Location')))
+ft <- compose(ft, i = 15, j = 1,part="body", as_paragraph(as_chunk('Dementia Diagnosis')))
+
+
+
+ft <- footnote( ft, i = 1, j = 1,
+            value = as_paragraph(
+              c("*Includes Vitas Hospice participant from an unknown location")
+            ), ref_symbols = c(""), part = "body")
+ft <- valign(ft, valign = "bottom", part = "header")
+  
+
+
+ft
+
+
+}
+load("datasample.rdata")
+
+```
+
+
+
+`r table_4(dat ,1)`  
+
+
+
